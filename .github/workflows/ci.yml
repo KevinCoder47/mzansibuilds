@@ -1,0 +1,26 @@
+name: MzansiBuilds CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Client Deps
+        run: cd client && npm install
+      - name: Build Client
+        run: cd client && npm run build
+
+  build-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Server Deps
+        run: cd server && npm install
+      - name: Typecheck Backend
+        run: cd server && npx tsc --noEmit

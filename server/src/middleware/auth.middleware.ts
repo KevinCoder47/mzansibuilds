@@ -21,9 +21,18 @@ export const protect = (req: AuthRequest, res: Response, next: NextFunction): vo
 
   const token = authHeader.split(' ')[1];
 
+  if (!token) {
+    res.status(401).json({ error: 'Not logged in. Please provide a token.' });
+    return;
+  }
+
   try {
-    // Verify the token — throws if invalid or expired
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev_secret') as { id: string };
+    // Verify the token — throws if invalid or expired.
+    // Double-cast via `unknown` because jwt.verify returns `Jwt & JwtPayload & void`
+    // which doesn't structurally overlap with `{ id: string }` directly.
+    const decoded = jwt.verify(token, process.env.JWT_SECRET ?? 'dev_secret') as unknown as {
+      id: string;
+    };
 
     // Attach the developer's id to the request for use in route handlers
     req.developerId = decoded.id;

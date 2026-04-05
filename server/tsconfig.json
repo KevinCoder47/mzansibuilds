@@ -21,7 +21,10 @@
 
     /* Module Options */
     "isolatedModules": true,
-    "moduleDetection": "force"
+    "moduleDetection": "force",
+
+    /* Type Definitions — tells TS about jest globals (describe, it, expect, etc.) */
+    "types": ["jest", "node"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules"]

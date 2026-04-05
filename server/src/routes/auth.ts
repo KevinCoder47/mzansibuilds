@@ -23,7 +23,7 @@ const loginSchema = z.object({
 // ─── Helper: create a JWT token ───────────────────────────────────────────────
 
 const createToken = (developerId: string): string => {
-  return jwt.sign({ id: developerId }, process.env.JWT_SECRET || 'dev_secret', {
+  return jwt.sign({ id: developerId }, process.env.JWT_SECRET ?? 'dev_secret', {
     expiresIn: '15m',
   });
 };
@@ -33,8 +33,8 @@ const createToken = (developerId: string): string => {
 router.post('/register', async (req: Request, res: Response) => {
   const result = registerSchema.safeParse(req.body);
   if (!result.success) {
-    // ✅ Fixed: Zod v4 uses .issues instead of .errors
-    const firstError = result.error.issues[0].message;
+    // noUncheckedIndexedAccess: issues[0] may be undefined, fall back to a safe message
+    const firstError = result.error.issues[0]?.message ?? 'Validation error';
     res.status(400).json({ error: firstError });
     return;
   }
@@ -79,8 +79,8 @@ router.post('/register', async (req: Request, res: Response) => {
 router.post('/login', async (req: Request, res: Response) => {
   const result = loginSchema.safeParse(req.body);
   if (!result.success) {
-    // ✅ Fixed: Zod v4 uses .issues instead of .errors
-    const firstError = result.error.issues[0].message;
+    // noUncheckedIndexedAccess: issues[0] may be undefined, fall back to a safe message
+    const firstError = result.error.issues[0]?.message ?? 'Validation error';
     res.status(400).json({ error: firstError });
     return;
   }

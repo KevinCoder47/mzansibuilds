@@ -40,7 +40,9 @@ router.get('/', (_req, res: Response) => {
 // ─── GET /api/projects/:id — single project ───────────────────────────────────
 
 router.get('/:id', (req, res: Response) => {
-  const project = findProjectById(req.params.id);
+  // noUncheckedIndexedAccess: params are typed as string | undefined; assert since route guarantees it
+  const id = req.params['id'] as string;
+  const project = findProjectById(id);
 
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
@@ -55,8 +57,8 @@ router.get('/:id', (req, res: Response) => {
 router.post('/', protect, (req: AuthRequest, res: Response) => {
   const result = projectSchema.safeParse(req.body);
   if (!result.success) {
-    // ✅ Fixed: Zod v4 uses .issues instead of .errors
-    const firstError = result.error.issues[0].message;
+    // noUncheckedIndexedAccess: issues[0] may be undefined, fall back to a safe message
+    const firstError = result.error.issues[0]?.message ?? 'Validation error';
     res.status(400).json({ error: firstError });
     return;
   }
@@ -73,7 +75,9 @@ router.post('/', protect, (req: AuthRequest, res: Response) => {
 // ─── PATCH /api/projects/:id — update a project (login required) ──────────────
 
 router.patch('/:id', protect, (req: AuthRequest, res: Response) => {
-  const project = findProjectById(req.params.id);
+  // noUncheckedIndexedAccess: params are typed as string | undefined; assert since route guarantees it
+  const id = req.params['id'] as string;
+  const project = findProjectById(id);
 
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
@@ -88,7 +92,8 @@ router.patch('/:id', protect, (req: AuthRequest, res: Response) => {
   const allowedUpdates = ['title', 'description', 'techStack', 'stage', 'supportRequired'];
   allowedUpdates.forEach((field) => {
     if (req.body[field] !== undefined) {
-      (project as Record<string, unknown>)[field] = req.body[field];
+      // Double-cast via `unknown` because Project has no index signature
+      (project as unknown as Record<string, unknown>)[field] = req.body[field];
     }
   });
 
@@ -98,7 +103,9 @@ router.patch('/:id', protect, (req: AuthRequest, res: Response) => {
 // ─── POST /api/projects/:id/milestones — add a milestone (login required) ────
 
 router.post('/:id/milestones', protect, (req: AuthRequest, res: Response) => {
-  const project = findProjectById(req.params.id);
+  // noUncheckedIndexedAccess: params are typed as string | undefined; assert since route guarantees it
+  const id = req.params['id'] as string;
+  const project = findProjectById(id);
 
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
@@ -107,19 +114,21 @@ router.post('/:id/milestones', protect, (req: AuthRequest, res: Response) => {
 
   const result = milestoneSchema.safeParse(req.body);
   if (!result.success) {
-    // ✅ Fixed: Zod v4 uses .issues instead of .errors
-    res.status(400).json({ error: result.error.issues[0].message });
+    // noUncheckedIndexedAccess: issues[0] may be undefined, fall back to a safe message
+    res.status(400).json({ error: result.error.issues[0]?.message ?? 'Validation error' });
     return;
   }
 
-  const milestone = addMilestone(req.params.id, result.data);
+  const milestone = addMilestone(id, result.data);
   res.status(201).json(milestone);
 });
 
 // ─── POST /api/projects/:id/complete — mark project as done (login required) ──
 
 router.post('/:id/complete', protect, (req: AuthRequest, res: Response) => {
-  const project = findProjectById(req.params.id);
+  // noUncheckedIndexedAccess: params are typed as string | undefined; assert since route guarantees it
+  const id = req.params['id'] as string;
+  const project = findProjectById(id);
 
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
@@ -131,7 +140,7 @@ router.post('/:id/complete', protect, (req: AuthRequest, res: Response) => {
     return;
   }
 
-  const completed = completeProject(req.params.id);
+  const completed = completeProject(id);
   res.status(200).json({
     message: 'Congratulations! Your project has been completed 🎉',
     project: completed,

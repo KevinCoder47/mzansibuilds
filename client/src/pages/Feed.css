@@ -26,12 +26,54 @@
   font-weight: 800;
   letter-spacing: -1px;
   margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Live indicator dot */
+.feed-live-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-bottom: 2px;
+}
+
+.feed-live-dot--on {
+  background: #22c55e;
+  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.6);
+  animation: live-pulse 2s ease-out infinite;
+}
+
+.feed-live-dot--off {
+  background: #f87171;
+}
+
+@keyframes live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(34, 197, 94, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+  }
 }
 
 .feed-subtitle {
   font-size: 15px;
   color: var(--text-muted);
   max-width: 500px;
+}
+
+.feed-last-updated {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  opacity: 0.7;
 }
 
 /* Filters */
@@ -90,10 +132,49 @@
   border-color: var(--border-hover);
 }
 
+.feed-filter-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
 .feed-count {
   font-size: 13px;
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+/* New projects badge */
+.feed-new-badge {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  padding: 5px 12px;
+  border-radius: 20px;
+  background: var(--teal-bg);
+  border: 1px solid var(--teal-border);
+  color: var(--teal);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  animation: badge-pop 0.3s ease-out;
+}
+
+.feed-new-badge:hover {
+  background: rgba(20, 184, 166, 0.15);
+  border-color: var(--teal);
+}
+
+@keyframes badge-pop {
+  0% {
+    transform: scale(0.85);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 /* Content */
@@ -214,5 +295,17 @@
   .feed-join-inner {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .feed-filters-inner {
+    flex-wrap: wrap;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .feed-filter-right {
+    width: 100%;
+    justify-content: flex-end;
+    padding-bottom: 8px;
   }
 }

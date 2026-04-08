@@ -38,6 +38,15 @@ export interface CollabRequest {
   createdAt: string;
 }
 
+export interface Comment {
+  id: string;
+  projectId: string;
+  userId: string;
+  username: string;
+  body: string;
+  createdAt: string;
+}
+
 // ── Interceptor: attach token on every request ───────────────────────────────
 
 api.interceptors.request.use((config) => {
@@ -49,8 +58,6 @@ api.interceptors.request.use((config) => {
 });
 
 // ── Interceptor: handle expired/invalid token globally ───────────────────────
-// Catches 401s from any API call and clears stale auth state so the user
-// is not left in a broken logged-in-but-rejected limbo.
 
 api.interceptors.response.use(
   (response) => response,
@@ -58,7 +65,6 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       localStorage.removeItem('mb_token');
       localStorage.removeItem('mb_user');
-      // Redirect to login — hard navigate so React state is fully reset
       window.location.href = '/login';
     }
     return Promise.reject(error);
@@ -83,7 +89,6 @@ export const authApi = {
 export const projectsApi = {
   getAll: async (): Promise<Project[]> => {
     const { data } = await api.get('/projects');
-    // Extracts projects array from backend response wrapper
     return data.projects;
   },
   getById: async (id: string): Promise<Project> => {
@@ -127,6 +132,19 @@ export const collabApi = {
   },
   raise: async (projectId: string, message: string): Promise<CollabRequest> => {
     const { data } = await api.post(`/projects/${projectId}/collab`, { message });
+    return data;
+  },
+};
+
+// ── Comments ──────────────────────────────────────────────────────────────────
+
+export const commentsApi = {
+  getForProject: async (projectId: string): Promise<Comment[]> => {
+    const { data } = await api.get(`/projects/${projectId}/comments`);
+    return data;
+  },
+  post: async (projectId: string, body: string): Promise<Comment> => {
+    const { data } = await api.post(`/projects/${projectId}/comments`, { body });
     return data;
   },
 };

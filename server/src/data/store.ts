@@ -2,7 +2,8 @@ import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
 
-// ─── Types & Interfaces (Keep these exactly as you had them) ──────────────────
+// ─── Types & Interfaces ───────────────────────────────────────────────────────
+
 export interface Developer {
   id: string;
   username: string;
@@ -12,7 +13,9 @@ export interface Developer {
   avatarUrl: string;
   createdAt: string;
 }
+
 export type ProjectStage = 'planning' | 'building' | 'testing' | 'launched' | 'completed';
+
 export interface Milestone {
   id: string;
   projectId: string;
@@ -20,6 +23,7 @@ export interface Milestone {
   description: string;
   achievedAt: string;
 }
+
 export interface CollabRequest {
   id: string;
   projectId: string;
@@ -28,6 +32,16 @@ export interface CollabRequest {
   message: string;
   createdAt: string;
 }
+
+export interface Comment {
+  id: string;
+  projectId: string;
+  userId: string;
+  username: string;
+  body: string;
+  createdAt: string;
+}
+
 export interface Project {
   id: string;
   developerId: string;
@@ -49,30 +63,31 @@ interface Schema {
   users: Developer[];
   projects: Project[];
   collabRequests: CollabRequest[];
+  comments: Comment[];
 }
 
-// Internal state
 let db: Schema = {
   users: [],
   projects: [],
   collabRequests: [],
+  comments: [],
 };
 
-// Load data from file on startup
 const loadData = () => {
   try {
     if (fs.existsSync(DB_PATH)) {
       const data = fs.readFileSync(DB_PATH, 'utf-8');
-      db = JSON.parse(data);
+      const parsed = JSON.parse(data);
+      // Migrate: ensure comments array exists in older data files
+      db = { comments: [], ...parsed };
     } else {
-      saveData(); // Create the file if it doesn't exist
+      saveData();
     }
   } catch (error) {
     console.error('Error loading database:', error);
   }
 };
 
-// Save data to file
 export const saveData = () => {
   try {
     fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), 'utf-8');
@@ -81,7 +96,6 @@ export const saveData = () => {
   }
 };
 
-// Initialize
 loadData();
 
 // ─── Developer Helpers ────────────────────────────────────────────────────────
@@ -167,9 +181,27 @@ export const addCollabRequest = (req: Omit<CollabRequest, 'id' | 'createdAt'>): 
 export const getCollabRequestsByProject = (projectId: string): CollabRequest[] =>
   db.collabRequests.filter((r) => r.projectId === projectId);
 
+// ─── Comment Helpers ──────────────────────────────────────────────────────────
+
+export const addComment = (data: Omit<Comment, 'id' | 'createdAt'>): Comment => {
+  const comment: Comment = {
+    ...data,
+    id: uuidv4(),
+    createdAt: new Date().toISOString(),
+  };
+  db.comments.push(comment);
+  saveData();
+  return comment;
+};
+
+export const getCommentsByProject = (projectId: string): Comment[] =>
+  db.comments
+    .filter((c) => c.projectId === projectId)
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
 // ─── System Helpers ───────────────────────────────────────────────────────────
 
 export const clearAll = (): void => {
-  db = { users: [], projects: [], collabRequests: [] };
+  db = { users: [], projects: [], collabRequests: [], comments: [] };
   saveData();
 };

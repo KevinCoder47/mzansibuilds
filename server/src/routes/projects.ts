@@ -9,6 +9,8 @@ import {
   completeProject,
   addCollabRequest,
   getCollabRequestsByProject,
+  addComment,
+  getCommentsByProject,
   ProjectStage,
   findUserById,
   saveData,
@@ -38,9 +40,16 @@ const collabSchema = z.object({
     .max(500, 'Message must be under 500 characters'),
 });
 
+const commentSchema = z.object({
+  body: z
+    .string()
+    .min(1, 'Comment cannot be empty')
+    .max(1000, 'Comment must be under 1000 characters'),
+});
+
 // ─── PROJECT FEED ────────────────────────────────────────────────────────────
 
-// GET /api/projects — Get all projects (Sorted by newest)
+// GET /api/projects — Get all projects (sorted by newest)
 router.get('/', (_req, res: Response) => {
   const allProjects = getProjects()
     .slice()
@@ -164,28 +173,24 @@ router.get('/:id/collab', (req, res: Response) => {
 router.post('/:id/collab', protect, (req: AuthRequest, res: Response) => {
   const projectId = req.params['id'] as string;
 
-  // 1. Check if user exists
   const user = findUserById(req.developerId as string);
   if (!user) {
     res.status(404).json({ error: 'User not found' });
     return;
   }
 
-  // 2. Validate message body
   const result = collabSchema.safeParse(req.body);
   if (!result.success) {
     res.status(400).json({ error: result.error.issues[0]?.message ?? 'Invalid message' });
     return;
   }
 
-  // 3. Prevent project owners from requesting to help their own project (Optional but logical)
   const project = findProjectById(projectId);
   if (project?.developerId === user.id) {
     res.status(400).json({ error: 'You cannot join your own project as a collaborator!' });
     return;
   }
 
-  // 4. Save the request
   const collab = addCollabRequest({
     projectId: projectId,
     userId: user.id,
@@ -194,6 +199,54 @@ router.post('/:id/collab', protect, (req: AuthRequest, res: Response) => {
   });
 
   res.status(201).json(collab);
+});
+
+// ─── COMMENTS SYSTEM ─────────────────────────────────────────────────────────
+
+// GET /api/projects/:id/comments — Get all comments for a project
+router.get('/:id/comments', (req, res: Response) => {
+  const projectId = req.params['id'] as string;
+
+  const project = findProjectById(projectId);
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+
+  const comments = getCommentsByProject(projectId);
+  res.status(200).json(comments);
+});
+
+// POST /api/projects/:id/comments — Post a comment (authenticated)
+router.post('/:id/comments', protect, (req: AuthRequest, res: Response) => {
+  const projectId = req.params['id'] as string;
+
+  const project = findProjectById(projectId);
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+
+  const user = findUserById(req.developerId as string);
+  if (!user) {
+    res.status(404).json({ error: 'User not found' });
+    return;
+  }
+
+  const result = commentSchema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({ error: result.error.issues[0]?.message ?? 'Invalid comment' });
+    return;
+  }
+
+  const comment = addComment({
+    projectId,
+    userId: user.id,
+    username: user.username,
+    body: result.data.body,
+  });
+
+  res.status(201).json(comment);
 });
 
 export default router;

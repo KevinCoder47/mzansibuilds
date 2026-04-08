@@ -1,3 +1,4 @@
+/* ── Main Card Container ─────────────────────────────────────────────────── */
 .project-card {
   display: flex;
   flex-direction: column;
@@ -9,9 +10,7 @@
     transform 0.2s,
     border-color 0.2s,
     box-shadow 0.2s;
-  cursor: pointer;
-  text-decoration: none;
-  color: inherit;
+  position: relative;
 }
 
 .project-card:hover {
@@ -20,7 +19,16 @@
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
 }
 
-/* Image / gradient area */
+.project-card-link {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* ── Image & Badges ──────────────────────────────────────────────────────── */
 .project-card-image {
   position: relative;
   height: 200px;
@@ -61,11 +69,10 @@
   border-radius: 20px;
   background: rgba(34, 197, 94, 0.8);
   color: #000;
-  color: #000;
   backdrop-filter: blur(4px);
 }
 
-/* Body */
+/* ── Card Body ───────────────────────────────────────────────────────────── */
 .project-card-body {
   padding: 20px;
   display: flex;
@@ -110,6 +117,52 @@
   overflow: hidden;
 }
 
+/* ── Milestone Preview ───────────────────────────────────────────────────── */
+.project-card-milestones-preview {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  border-left: 3px solid #00ff88; /* Success/Mzansi Green */
+}
+
+.milestone-preview-title {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #888;
+  margin-bottom: 0.5rem;
+}
+
+.milestone-preview-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.milestone-preview-item {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.milestone-icon {
+  font-size: 0.8rem;
+}
+
+.milestone-text {
+  font-size: 0.85rem;
+  color: #eee;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.milestone-date {
+  font-size: 0.7rem;
+  color: #666;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
 .project-card-footer {
   display: flex;
   align-items: center;
@@ -129,4 +182,174 @@
 .project-milestones {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+/* ── Action Bar ──────────────────────────────────────────────────────────── */
+.project-card-actions {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.card-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-body);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.18s;
+}
+
+.card-action-btn:hover {
+  color: var(--text);
+  border-color: var(--border-hover);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.card-action-btn--raise {
+  color: var(--teal);
+  border-color: var(--teal-border);
+  background: var(--teal-bg);
+}
+
+.card-action-btn--raise:hover {
+  background: rgba(20, 184, 166, 0.15);
+  border-color: var(--teal);
+}
+
+/* ── Modal & Comments ────────────────────────────────────────────────────── */
+.card-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.card-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border-hover);
+  border-radius: 16px;
+  padding: 24px;
+  width: 100%;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
+}
+
+.card-modal--comments {
+  max-width: 520px;
+}
+
+.card-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.card-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+
+.card-modal-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: var(--font-body);
+  padding: 10px 12px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.card-modal-textarea:focus {
+  outline: none;
+  border-color: var(--teal);
+}
+
+.card-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.card-modal-btn {
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font-body);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  transition: all 0.15s;
+}
+
+.card-modal-btn--primary {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #000;
+  font-weight: 600;
+}
+
+.card-comments-list {
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 4px;
+}
+
+.card-comment {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.card-comment-author {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--teal);
+}
+
+.card-comment-body {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+  margin: 0;
+  word-break: break-word;
 }

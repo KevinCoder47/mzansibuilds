@@ -1,7 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
+import fs from 'fs';
+import path from 'path';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
+// ─── Types & Interfaces (Keep these exactly as you had them) ──────────────────
 export interface Developer {
   id: string;
   username: string;
@@ -11,9 +12,7 @@ export interface Developer {
   avatarUrl: string;
   createdAt: string;
 }
-
 export type ProjectStage = 'planning' | 'building' | 'testing' | 'launched' | 'completed';
-
 export interface Milestone {
   id: string;
   projectId: string;
@@ -21,7 +20,14 @@ export interface Milestone {
   description: string;
   achievedAt: string;
 }
-
+export interface CollabRequest {
+  id: string;
+  projectId: string;
+  userId: string;
+  username: string;
+  message: string;
+  createdAt: string;
+}
 export interface Project {
   id: string;
   developerId: string;
@@ -35,44 +41,85 @@ export interface Project {
   createdAt: string;
 }
 
-// ─── In-memory "database" ─────────────────────────────────────────────────────
+// ─── Persistence Logic ────────────────────────────────────────────────────────
 
-let users: Developer[] = [];
-let projects: Project[] = [];
+const DB_PATH = path.join(__dirname, '../../data.json');
 
-// ─── Developer helpers ────────────────────────────────────────────────────────
+interface Schema {
+  users: Developer[];
+  projects: Project[];
+  collabRequests: CollabRequest[];
+}
 
-export const getUsers = (): Developer[] => users;
+// Internal state
+let db: Schema = {
+  users: [],
+  projects: [],
+  collabRequests: [],
+};
+
+// Load data from file on startup
+const loadData = () => {
+  try {
+    if (fs.existsSync(DB_PATH)) {
+      const data = fs.readFileSync(DB_PATH, 'utf-8');
+      db = JSON.parse(data);
+    } else {
+      saveData(); // Create the file if it doesn't exist
+    }
+  } catch (error) {
+    console.error('Error loading database:', error);
+  }
+};
+
+// Save data to file
+export const saveData = () => {
+  try {
+    fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), 'utf-8');
+  } catch (error) {
+    console.error('Error saving database:', error);
+  }
+};
+
+// Initialize
+loadData();
+
+// ─── Developer Helpers ────────────────────────────────────────────────────────
+
+export const getUsers = (): Developer[] => db.users;
+
 export const addUser = (user: Developer): void => {
-  users.push(user);
+  db.users.push(user);
+  saveData();
 };
+
 export const findUserByEmail = (email: string): Developer | undefined =>
-  users.find((u) => u.email === email);
-export const findUserById = (id: string): Developer | undefined => users.find((u) => u.id === id);
-export const clearUsers = (): void => {
-  users = [];
-};
+  db.users.find((u) => u.email === email);
 
-// ─── Project helpers ──────────────────────────────────────────────────────────
+export const findUserById = (id: string): Developer | undefined =>
+  db.users.find((u) => u.id === id);
 
-export const getProjects = (): Project[] => projects;
+// ─── Project Helpers ──────────────────────────────────────────────────────────
+
+export const getProjects = (): Project[] => db.projects;
+
+export const findProjectById = (id: string): Project | undefined =>
+  db.projects.find((p) => p.id === id);
 
 export const addProject = (
-  project: Omit<Project, 'id' | 'milestones' | 'isCompleted' | 'createdAt'>,
+  projectData: Omit<Project, 'id' | 'milestones' | 'isCompleted' | 'createdAt'>,
 ): Project => {
   const newProject: Project = {
-    ...project,
+    ...projectData,
     id: uuidv4(),
     milestones: [],
     isCompleted: false,
     createdAt: new Date().toISOString(),
   };
-  projects.push(newProject);
+  db.projects.push(newProject);
+  saveData();
   return newProject;
 };
-
-export const findProjectById = (id: string): Project | undefined =>
-  projects.find((p) => p.id === id);
 
 export const addMilestone = (
   projectId: string,
@@ -90,17 +137,39 @@ export const addMilestone = (
   };
 
   project.milestones.push(milestone);
+  saveData();
   return milestone;
 };
 
 export const completeProject = (projectId: string): Project | null => {
   const project = findProjectById(projectId);
   if (!project) return null;
+
   project.isCompleted = true;
   project.stage = 'completed';
+  saveData();
   return project;
 };
 
-export const clearProjects = (): void => {
-  projects = [];
+// ─── Collaboration Helpers ────────────────────────────────────────────────────
+
+export const addCollabRequest = (req: Omit<CollabRequest, 'id' | 'createdAt'>): CollabRequest => {
+  const newRequest: CollabRequest = {
+    ...req,
+    id: uuidv4(),
+    createdAt: new Date().toISOString(),
+  };
+  db.collabRequests.push(newRequest);
+  saveData();
+  return newRequest;
+};
+
+export const getCollabRequestsByProject = (projectId: string): CollabRequest[] =>
+  db.collabRequests.filter((r) => r.projectId === projectId);
+
+// ─── System Helpers ───────────────────────────────────────────────────────────
+
+export const clearAll = (): void => {
+  db = { users: [], projects: [], collabRequests: [] };
+  saveData();
 };

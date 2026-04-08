@@ -24,7 +24,7 @@ const loginSchema = z.object({
 
 const createToken = (developerId: string): string => {
   return jwt.sign({ id: developerId }, process.env.JWT_SECRET ?? 'dev_secret', {
-    expiresIn: '15m',
+    expiresIn: '7d',
   });
 };
 

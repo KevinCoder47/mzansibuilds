@@ -7,12 +7,16 @@ import {
   findProjectById,
   addMilestone,
   completeProject,
+  addCollabRequest,
+  getCollabRequestsByProject,
   ProjectStage,
+  findUserById,
+  saveData,
 } from '../data/store';
 
 const router = Router();
 
-// ─── Validation schemas ───────────────────────────────────────────────────────
+// ─── VALIDATION SCHEMAS ──────────────────────────────────────────────────────
 
 const projectSchema = z.object({
   title: z.string().min(3, 'Title must be at least 3 characters'),
@@ -27,8 +31,16 @@ const milestoneSchema = z.object({
   description: z.string(),
 });
 
-// ─── GET /api/projects — public live feed ─────────────────────────────────────
+const collabSchema = z.object({
+  message: z
+    .string()
+    .min(1, 'Message is required')
+    .max(500, 'Message must be under 500 characters'),
+});
 
+// ─── PROJECT FEED ────────────────────────────────────────────────────────────
+
+// GET /api/projects — Get all projects (Sorted by newest)
 router.get('/', (_req, res: Response) => {
   const allProjects = getProjects()
     .slice()
@@ -37,10 +49,8 @@ router.get('/', (_req, res: Response) => {
   res.status(200).json({ projects: allProjects });
 });
 
-// ─── GET /api/projects/:id — single project ───────────────────────────────────
-
+// GET /api/projects/:id — Get specific project details
 router.get('/:id', (req, res: Response) => {
-  // noUncheckedIndexedAccess: params are typed as string | undefined; assert since route guarantees it
   const id = req.params['id'] as string;
   const project = findProjectById(id);
 
@@ -52,12 +62,12 @@ router.get('/:id', (req, res: Response) => {
   res.status(200).json(project);
 });
 
-// ─── POST /api/projects — create a project (login required) ──────────────────
+// ─── PROJECT ACTIONS (PROTECTED) ─────────────────────────────────────────────
 
+// POST /api/projects — Create a new project
 router.post('/', protect, (req: AuthRequest, res: Response) => {
   const result = projectSchema.safeParse(req.body);
   if (!result.success) {
-    // noUncheckedIndexedAccess: issues[0] may be undefined, fall back to a safe message
     const firstError = result.error.issues[0]?.message ?? 'Validation error';
     res.status(400).json({ error: firstError });
     return;
@@ -72,10 +82,8 @@ router.post('/', protect, (req: AuthRequest, res: Response) => {
   res.status(201).json(newProject);
 });
 
-// ─── PATCH /api/projects/:id — update a project (login required) ──────────────
-
+// PATCH /api/projects/:id — Update project info
 router.patch('/:id', protect, (req: AuthRequest, res: Response) => {
-  // noUncheckedIndexedAccess: params are typed as string | undefined; assert since route guarantees it
   const id = req.params['id'] as string;
   const project = findProjectById(id);
 
@@ -92,18 +100,17 @@ router.patch('/:id', protect, (req: AuthRequest, res: Response) => {
   const allowedUpdates = ['title', 'description', 'techStack', 'stage', 'supportRequired'];
   allowedUpdates.forEach((field) => {
     if (req.body[field] !== undefined) {
-      // Double-cast via `unknown` because Project has no index signature
-      (project as unknown as Record<string, unknown>)[field] = req.body[field];
+      (project as any)[field] = req.body[field];
     }
   });
+
+  saveData();
 
   res.status(200).json(project);
 });
 
-// ─── POST /api/projects/:id/milestones — add a milestone (login required) ────
-
+// POST /api/projects/:id/milestones — Add a milestone
 router.post('/:id/milestones', protect, (req: AuthRequest, res: Response) => {
-  // noUncheckedIndexedAccess: params are typed as string | undefined; assert since route guarantees it
   const id = req.params['id'] as string;
   const project = findProjectById(id);
 
@@ -114,7 +121,6 @@ router.post('/:id/milestones', protect, (req: AuthRequest, res: Response) => {
 
   const result = milestoneSchema.safeParse(req.body);
   if (!result.success) {
-    // noUncheckedIndexedAccess: issues[0] may be undefined, fall back to a safe message
     res.status(400).json({ error: result.error.issues[0]?.message ?? 'Validation error' });
     return;
   }
@@ -123,10 +129,8 @@ router.post('/:id/milestones', protect, (req: AuthRequest, res: Response) => {
   res.status(201).json(milestone);
 });
 
-// ─── POST /api/projects/:id/complete — mark project as done (login required) ──
-
+// POST /api/projects/:id/complete — Mark as finished
 router.post('/:id/complete', protect, (req: AuthRequest, res: Response) => {
-  // noUncheckedIndexedAccess: params are typed as string | undefined; assert since route guarantees it
   const id = req.params['id'] as string;
   const project = findProjectById(id);
 
@@ -145,6 +149,51 @@ router.post('/:id/complete', protect, (req: AuthRequest, res: Response) => {
     message: 'Congratulations! Your project has been completed 🎉',
     project: completed,
   });
+});
+
+// ─── COLLABORATION SYSTEM ────────────────────────────────────────────────────
+
+// GET /api/projects/:id/collab — See who wants to help
+router.get('/:id/collab', (req, res: Response) => {
+  const id = req.params['id'] as string;
+  const requests = getCollabRequestsByProject(id);
+  res.status(200).json(requests);
+});
+
+// POST /api/projects/:id/collab — Raise your hand to help
+router.post('/:id/collab', protect, (req: AuthRequest, res: Response) => {
+  const projectId = req.params['id'] as string;
+
+  // 1. Check if user exists
+  const user = findUserById(req.developerId as string);
+  if (!user) {
+    res.status(404).json({ error: 'User not found' });
+    return;
+  }
+
+  // 2. Validate message body
+  const result = collabSchema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({ error: result.error.issues[0]?.message ?? 'Invalid message' });
+    return;
+  }
+
+  // 3. Prevent project owners from requesting to help their own project (Optional but logical)
+  const project = findProjectById(projectId);
+  if (project?.developerId === user.id) {
+    res.status(400).json({ error: 'You cannot join your own project as a collaborator!' });
+    return;
+  }
+
+  // 4. Save the request
+  const collab = addCollabRequest({
+    projectId: projectId,
+    userId: user.id,
+    username: user.username,
+    message: result.data.message,
+  });
+
+  res.status(201).json(collab);
 });
 
 export default router;

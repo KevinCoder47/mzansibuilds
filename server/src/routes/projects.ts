@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { protect, AuthRequest } from '../middleware/auth.middleware';
 import {
@@ -15,10 +15,11 @@ import {
   findUserById,
   saveData,
 } from '../data/store';
+import { subscribe, unsubscribe, broadcast } from '../lib/sseBroker';
 
 const router = Router();
 
-// ─── VALIDATION SCHEMAS ──────────────────────────────────────────────────────
+// ─── VALIDATION SCHEMAS ───────────────────────────────────────────────────────
 
 const projectSchema = z.object({
   title: z.string().min(3, 'Title must be at least 3 characters'),
@@ -47,14 +48,13 @@ const commentSchema = z.object({
     .max(1000, 'Comment must be under 1000 characters'),
 });
 
-// ─── PROJECT FEED ────────────────────────────────────────────────────────────
+// ─── PROJECT FEED ─────────────────────────────────────────────────────────────
 
 // GET /api/projects — Get all projects (sorted by newest)
 router.get('/', (_req, res: Response) => {
   const allProjects = getProjects()
     .slice()
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
   res.status(200).json({ projects: allProjects });
 });
 
@@ -62,13 +62,51 @@ router.get('/', (_req, res: Response) => {
 router.get('/:id', (req, res: Response) => {
   const id = req.params['id'] as string;
   const project = findProjectById(id);
-
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
     return;
   }
-
   res.status(200).json(project);
+});
+
+// ─── REAL-TIME SSE STREAM ─────────────────────────────────────────────────────
+
+/**
+ * GET /api/projects/:id/events
+ *
+ * Server-Sent Events stream scoped to a single project.
+ * Emits:
+ *   event: comment   — when a new comment is posted
+ *   event: collab    — when a new collaboration request is raised
+ *   event: ping      — keepalive every 25 s (handled by sseBroker)
+ *
+ * No authentication required — comments/collab data is already public via REST.
+ */
+router.get('/:id/events', (req: Request, res: Response) => {
+  const projectId = req.params['id'] as string;
+
+  // Validate project exists before opening a stream
+  if (!findProjectById(projectId)) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+
+  // SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering if present
+  res.flushHeaders();
+
+  // Send an immediate connected confirmation so the client knows the stream is live
+  res.write(`event: connected\ndata: {"projectId":"${projectId}"}\n\n`);
+
+  const client = subscribe(projectId, res);
+
+  // Clean up when the client closes the connection
+  req.on('close', () => {
+    unsubscribe(client);
+  });
 });
 
 // ─── PROJECT ACTIONS (PROTECTED) ─────────────────────────────────────────────
@@ -81,13 +119,11 @@ router.post('/', protect, (req: AuthRequest, res: Response) => {
     res.status(400).json({ error: firstError });
     return;
   }
-
   const newProject = addProject({
     ...result.data,
     stage: result.data.stage as ProjectStage,
     developerId: req.developerId as string,
   });
-
   res.status(201).json(newProject);
 });
 
@@ -95,26 +131,21 @@ router.post('/', protect, (req: AuthRequest, res: Response) => {
 router.patch('/:id', protect, (req: AuthRequest, res: Response) => {
   const id = req.params['id'] as string;
   const project = findProjectById(id);
-
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
     return;
   }
-
   if (project.developerId !== req.developerId) {
     res.status(403).json({ error: 'You can only update your own projects' });
     return;
   }
-
   const allowedUpdates = ['title', 'description', 'techStack', 'stage', 'supportRequired'];
   allowedUpdates.forEach((field) => {
     if (req.body[field] !== undefined) {
       (project as any)[field] = req.body[field];
     }
   });
-
   saveData();
-
   res.status(200).json(project);
 });
 
@@ -122,18 +153,15 @@ router.patch('/:id', protect, (req: AuthRequest, res: Response) => {
 router.post('/:id/milestones', protect, (req: AuthRequest, res: Response) => {
   const id = req.params['id'] as string;
   const project = findProjectById(id);
-
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
     return;
   }
-
   const result = milestoneSchema.safeParse(req.body);
   if (!result.success) {
     res.status(400).json({ error: result.error.issues[0]?.message ?? 'Validation error' });
     return;
   }
-
   const milestone = addMilestone(id, result.data);
   res.status(201).json(milestone);
 });
@@ -142,17 +170,14 @@ router.post('/:id/milestones', protect, (req: AuthRequest, res: Response) => {
 router.post('/:id/complete', protect, (req: AuthRequest, res: Response) => {
   const id = req.params['id'] as string;
   const project = findProjectById(id);
-
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
     return;
   }
-
   if (project.developerId !== req.developerId) {
     res.status(403).json({ error: 'You can only complete your own projects' });
     return;
   }
-
   const completed = completeProject(id);
   res.status(200).json({
     message: 'Congratulations! Your project has been completed 🎉',
@@ -160,7 +185,7 @@ router.post('/:id/complete', protect, (req: AuthRequest, res: Response) => {
   });
 });
 
-// ─── COLLABORATION SYSTEM ────────────────────────────────────────────────────
+// ─── COLLABORATION SYSTEM ─────────────────────────────────────────────────────
 
 // GET /api/projects/:id/collab — See who wants to help
 router.get('/:id/collab', (req, res: Response) => {
@@ -172,25 +197,21 @@ router.get('/:id/collab', (req, res: Response) => {
 // POST /api/projects/:id/collab — Raise your hand to help
 router.post('/:id/collab', protect, (req: AuthRequest, res: Response) => {
   const projectId = req.params['id'] as string;
-
   const user = findUserById(req.developerId as string);
   if (!user) {
     res.status(404).json({ error: 'User not found' });
     return;
   }
-
   const result = collabSchema.safeParse(req.body);
   if (!result.success) {
     res.status(400).json({ error: result.error.issues[0]?.message ?? 'Invalid message' });
     return;
   }
-
   const project = findProjectById(projectId);
   if (project?.developerId === user.id) {
     res.status(400).json({ error: 'You cannot join your own project as a collaborator!' });
     return;
   }
-
   const collab = addCollabRequest({
     projectId: projectId,
     userId: user.id,
@@ -198,21 +219,22 @@ router.post('/:id/collab', protect, (req: AuthRequest, res: Response) => {
     message: result.data.message,
   });
 
+  // ── Broadcast to all SSE subscribers of this project ──
+  broadcast(projectId, 'collab', collab);
+
   res.status(201).json(collab);
 });
 
-// ─── COMMENTS SYSTEM ─────────────────────────────────────────────────────────
+// ─── COMMENTS SYSTEM ──────────────────────────────────────────────────────────
 
 // GET /api/projects/:id/comments — Get all comments for a project
 router.get('/:id/comments', (req, res: Response) => {
   const projectId = req.params['id'] as string;
-
   const project = findProjectById(projectId);
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
     return;
   }
-
   const comments = getCommentsByProject(projectId);
   res.status(200).json(comments);
 });
@@ -220,31 +242,30 @@ router.get('/:id/comments', (req, res: Response) => {
 // POST /api/projects/:id/comments — Post a comment (authenticated)
 router.post('/:id/comments', protect, (req: AuthRequest, res: Response) => {
   const projectId = req.params['id'] as string;
-
   const project = findProjectById(projectId);
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
     return;
   }
-
   const user = findUserById(req.developerId as string);
   if (!user) {
     res.status(404).json({ error: 'User not found' });
     return;
   }
-
   const result = commentSchema.safeParse(req.body);
   if (!result.success) {
     res.status(400).json({ error: result.error.issues[0]?.message ?? 'Invalid comment' });
     return;
   }
-
   const comment = addComment({
     projectId,
     userId: user.id,
     username: user.username,
     body: result.data.body,
   });
+
+  // ── Broadcast to all SSE subscribers of this project ──
+  broadcast(projectId, 'comment', comment);
 
   res.status(201).json(comment);
 });

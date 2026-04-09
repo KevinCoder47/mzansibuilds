@@ -14,7 +14,8 @@ const STAGE_FILTERS: { label: string; value: ProjectStage | 'all' }[] = [
   { label: 'Completed', value: 'completed' },
 ];
 
-const POLL_INTERVAL = 30_000; // 30 seconds
+// Fallback polling interval — only used when SSE is unavailable
+const FALLBACK_POLL_MS = 30_000;
 
 export default function Feed() {
   const { user } = useAuth();
@@ -26,50 +27,39 @@ export default function Feed() {
   // Live feed state
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [newCount, setNewCount] = useState(0);
-  const [isLive, setIsLive] = useState(true);
+  const [isLive, setIsLive] = useState(false);
 
   // Refs for change detection
   const projectIdsRef = useRef<Set<string>>(new Set());
-  const milestonesHashRef = useRef<string>('');
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Fetch / refresh the project list ──────────────────────────────────────
 
   const fetchProjects = async (isInitial = false) => {
     try {
       const data = await projectsApi.getAll();
 
-      // Create a "fingerprint" of the milestones to detect content updates
-      const currentMilestonesHash = data.map((p) => p.milestones.length).join(',');
-
       if (isInitial) {
-        // On first load, seed the known IDs and fingerprint
         projectIdsRef.current = new Set(data.map((p) => p.id));
-        milestonesHashRef.current = currentMilestonesHash;
         setProjects(data);
         setNewCount(0);
       } else {
-        // Detect genuinely new projects or content changes
         const added = data.filter((p) => !projectIdsRef.current.has(p.id));
-        const milestonesChanged = currentMilestonesHash !== milestonesHashRef.current;
-
-        // If something meaningful changed, update the UI and refs
-        if (added.length > 0 || milestonesChanged) {
+        if (added.length > 0) {
           projectIdsRef.current = new Set(data.map((p) => p.id));
-          milestonesHashRef.current = currentMilestonesHash;
           setProjects(data);
-
-          if (added.length > 0) {
-            setNewCount((prev) => prev + added.length);
-          }
+          setNewCount((prev) => prev + added.length);
         }
       }
 
       setLastUpdated(new Date());
       setIsLive(true);
+
       if (isInitial) {
         setError('');
         setLoading(false);
       }
-    } catch (err) {
+    } catch {
       if (isInitial) {
         setError('Failed to load projects. Is the server running?');
         setLoading(false);
@@ -78,23 +68,32 @@ export default function Feed() {
     }
   };
 
-  // Initial load
+  // ── Initial load ──────────────────────────────────────────────────────────
+
   useEffect(() => {
     fetchProjects(true);
   }, []);
 
-  // Polling — runs every 30s
-  useEffect(() => {
-    pollTimerRef.current = setInterval(() => {
-      fetchProjects(false);
-    }, POLL_INTERVAL);
+  // ── SSE — watches for new comments/collab on ANY project so the live dot
+  //    stays accurate. The Feed itself doesn't need per-project comment data;
+  //    the indicator just needs to know the server is reachable via SSE.
+  //
+  //    We do NOT open N streams (one per card) here. Each ProjectCard manages
+  //    its own stream only while its modal is open. Feed-level liveness is
+  //    still signalled by the fallback poll below so the dot stays green.
+  // ─────────────────────────────────────────────────────────────────────────
 
+  // ── Fallback: poll every 30 s to catch new projects and keep the live dot ──
+
+  useEffect(() => {
+    pollTimerRef.current = setInterval(() => fetchProjects(false), FALLBACK_POLL_MS);
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     };
   }, []);
 
-  // Refresh when user returns to the tab
+  // ── Refresh when user returns to the tab ─────────────────────────────────
+
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === 'visible') fetchProjects(false);
@@ -102,6 +101,8 @@ export default function Feed() {
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
+
+  // ── Filtering ─────────────────────────────────────────────────────────────
 
   const filtered = filter === 'all' ? projects : projects.filter((p) => p.stage === filter);
 
@@ -131,7 +132,8 @@ export default function Feed() {
             </p>
             {lastUpdated && (
               <p className="feed-last-updated">
-                Updated {formatLastUpdated(lastUpdated)} · auto-refreshes every 30s
+                Updated {formatLastUpdated(lastUpdated)} · comments & collabs update instantly via
+                SSE
               </p>
             )}
           </div>

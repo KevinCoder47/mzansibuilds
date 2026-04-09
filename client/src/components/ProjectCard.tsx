@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import type { Project, Comment } from '../services/api';
-import { collabApi, commentsApi } from '../services/api';
+import type { Project, Comment, CollabRequest } from '../services/api';
+import { collabApi, commentsApi, openProjectStream } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import './ProjectCard.css';
 
@@ -58,21 +58,99 @@ export default function ProjectCard({ project, variant = 'feed' }: Props) {
   const { user } = useAuth();
   const category = getCategoryFromStack(project.techStack);
   const gradient = getGradient(project.id);
+  const isOwner = user?.id === project.developerId;
 
-  // ── Raise Hand modal ──
+  // ── Raise Hand modal (Non-owners) ────────────────────────────────────────
   const [showCollab, setShowCollab] = useState(false);
   const [collabMsg, setCollabMsg] = useState('');
   const [collabSending, setCollabSending] = useState(false);
   const [collabDone, setCollabDone] = useState(false);
   const [collabError, setCollabError] = useState('');
 
-  // ── Comments panel ──
+  // ── Inbox Modal (Owner Only) ──────────────────────────────────────────────
+  const [showInbox, setShowInbox] = useState(false);
+  const [incomingRequests, setIncomingRequests] = useState<CollabRequest[]>([]);
+  const [inboxLoading, setInboxLoading] = useState(false);
+  const [inboxHasNew, setInboxHasNew] = useState(false);
+
+  // ── Comments panel ────────────────────────────────────────────────────────
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentBody, setCommentBody] = useState('');
   const [commentSending, setCommentSending] = useState(false);
-  const [commentError, setCommentError] = useState('');
+
+  // Auto-scroll ref for comment list
+  const commentsBottomRef = useRef<HTMLDivElement>(null);
+
+  // ── SSE stream — opened only while a modal is active ─────────────────────
+  //
+  // We open ONE stream per card, shared between the comment and inbox panels.
+  // The stream is opened when either modal opens and closed when both close.
+  // This avoids N idle connections when no panel is visible.
+  const streamCloseRef = useRef<(() => void) | null>(null);
+  const anyModalOpen = showComments || showInbox;
+
+  useEffect(() => {
+    if (!anyModalOpen) {
+      // Both modals closed — tear down the stream
+      if (streamCloseRef.current) {
+        streamCloseRef.current();
+        streamCloseRef.current = null;
+      }
+      return;
+    }
+
+    // Open the SSE stream for this project
+    const close = openProjectStream(project.id, {
+      onComment: (newComment) => {
+        // Append to the comment list, deduplicating by id
+        setComments((prev) =>
+          prev.some((c) => c.id === newComment.id) ? prev : [...prev, newComment],
+        );
+      },
+      onCollab: (newCollab) => {
+        // Append to the owner's inbox, deduplicating by id
+        setIncomingRequests((prev) =>
+          prev.some((r) => r.id === newCollab.id) ? prev : [...prev, newCollab],
+        );
+        // Flag new requests even if the inbox modal isn't open yet
+        if (!showInbox) setInboxHasNew(true);
+      },
+    });
+
+    streamCloseRef.current = close;
+
+    return () => {
+      close();
+      streamCloseRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anyModalOpen, project.id]);
+
+  // Auto-scroll the comment list to the bottom when new messages arrive
+  useEffect(() => {
+    if (showComments) {
+      commentsBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [comments, showComments]);
+
+  // ── Handlers ──────────────────────────────────────────────────────────────
+
+  const openInbox = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    setShowInbox(true);
+    setInboxHasNew(false);
+    setInboxLoading(true);
+    try {
+      const data = await collabApi.getForProject(project.id);
+      setIncomingRequests(data);
+    } catch (err) {
+      console.error('Failed to fetch collaboration requests', err);
+    } finally {
+      setInboxLoading(false);
+    }
+  };
 
   const handleRaiseHand = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -110,19 +188,22 @@ export default function ProjectCard({ project, variant = 'feed' }: Props) {
     e.preventDefault();
     if (!commentBody.trim()) return;
     setCommentSending(true);
-    setCommentError('');
     try {
+      // The REST POST response is the authoritative copy; SSE will also broadcast
+      // it to other open clients. We optimistically append here so the poster
+      // sees their comment immediately without waiting for the SSE echo.
       const newComment = await commentsApi.post(project.id, commentBody.trim());
-      setComments((prev) => [...prev, newComment]);
+      setComments((prev) =>
+        prev.some((c) => c.id === newComment.id) ? prev : [...prev, newComment],
+      );
       setCommentBody('');
     } catch (err: any) {
-      setCommentError(err?.response?.data?.error ?? 'Could not post comment.');
+      alert(err?.response?.data?.error ?? 'Could not post comment.');
     } finally {
       setCommentSending(false);
     }
   };
 
-  // Extract recent milestones for display
   const recentMilestones = [...project.milestones]
     .sort((a, b) => new Date(b.achievedAt).getTime() - new Date(a.achievedAt).getTime())
     .slice(0, 2);
@@ -148,7 +229,6 @@ export default function ProjectCard({ project, variant = 'feed' }: Props) {
           <h3 className="project-card-title">{project.title}</h3>
           <p className="project-card-desc">{project.description}</p>
 
-          {/* Live Milestone Content */}
           {project.milestones.length > 0 && (
             <div className="project-card-milestones-preview">
               <h4 className="milestone-preview-title">Recent Updates</h4>
@@ -177,6 +257,7 @@ export default function ProjectCard({ project, variant = 'feed' }: Props) {
         </div>
       </Link>
 
+      {/* ── Action bar ──────────────────────────────────────────────────── */}
       <div className="project-card-actions">
         <button className="card-action-btn" onClick={openComments}>
           <svg
@@ -194,7 +275,30 @@ export default function ProjectCard({ project, variant = 'feed' }: Props) {
           Comment
         </button>
 
-        {user && user.id !== project.developerId && !project.isCompleted && (
+        {isOwner && (
+          <button
+            className={`card-action-btn card-action-btn--inbox ${inboxHasNew ? 'card-action-btn--inbox-new' : ''}`}
+            onClick={openInbox}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+              <polyline points="22,6 12,13 2,6" />
+            </svg>
+            Review Requests
+            {inboxHasNew && <span className="inbox-new-dot" aria-label="New requests" />}
+          </button>
+        )}
+
+        {user && !isOwner && !project.isCompleted && (
           <button
             className="card-action-btn card-action-btn--raise"
             onClick={(e) => {
@@ -222,7 +326,104 @@ export default function ProjectCard({ project, variant = 'feed' }: Props) {
         )}
       </div>
 
-      {/* --- MODALS --- */}
+      {/* ── Incoming Requests Modal (Owner) ──────────────────────────────── */}
+      {showInbox && (
+        <div className="card-modal-backdrop" onClick={() => setShowInbox(false)}>
+          <div className="card-modal card-modal--inbox" onClick={(e) => e.stopPropagation()}>
+            <div className="card-modal-header">
+              <span>
+                📩 Collaboration Requests
+                <span className="modal-live-badge" title="Live — new requests appear instantly">
+                  ● LIVE
+                </span>
+              </span>
+              <button className="card-modal-close" onClick={() => setShowInbox(false)}>
+                ✕
+              </button>
+            </div>
+            <div className="card-inbox-list">
+              {inboxLoading ? (
+                <p className="modal-status-text">Loading requests...</p>
+              ) : incomingRequests.length === 0 ? (
+                <p className="modal-status-text">No requests yet. Build something they'll love!</p>
+              ) : (
+                incomingRequests.map((req) => (
+                  <div key={req.id} className="card-inbox-item">
+                    <div className="inbox-item-header">
+                      <span className="inbox-item-author">@{req.username}</span>
+                      <span className="inbox-item-date">{timeAgo(req.createdAt)}</span>
+                    </div>
+                    <p className="inbox-item-msg">{req.message}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Comments Modal ───────────────────────────────────────────────── */}
+      {showComments && (
+        <div className="card-modal-backdrop" onClick={() => setShowComments(false)}>
+          <div className="card-modal card-modal--comments" onClick={(e) => e.stopPropagation()}>
+            <div className="card-modal-header">
+              <span>
+                💬 Comments
+                <span className="modal-live-badge" title="Live — new comments appear instantly">
+                  ● LIVE
+                </span>
+              </span>
+              <button className="card-modal-close" onClick={() => setShowComments(false)}>
+                ✕
+              </button>
+            </div>
+            <div className="card-comments-list">
+              {commentsLoading ? (
+                <p className="modal-status-text">Loading comments...</p>
+              ) : comments.length === 0 ? (
+                <p className="modal-status-text">No comments yet. Be the first!</p>
+              ) : (
+                comments.map((c) => (
+                  <div key={c.id} className="card-comment">
+                    <div className="card-comment-header">
+                      <span className="card-comment-author">{c.username}</span>
+                      <span className="card-comment-date">{timeAgo(c.createdAt)}</span>
+                    </div>
+                    <p className="card-comment-body">{c.body}</p>
+                  </div>
+                ))
+              )}
+              {/* Sentinel element — scrolled into view when new comments arrive */}
+              <div ref={commentsBottomRef} />
+            </div>
+            {user && (
+              <div className="card-comment-form">
+                <textarea
+                  className="card-modal-textarea"
+                  value={commentBody}
+                  onChange={(e) => setCommentBody(e.target.value)}
+                  placeholder="Add comment..."
+                  onKeyDown={(e) => {
+                    // Cmd/Ctrl + Enter submits
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                      handlePostComment(e as any);
+                    }
+                  }}
+                />
+                <button
+                  className="card-modal-btn card-modal-btn--primary"
+                  onClick={handlePostComment}
+                  disabled={commentSending || !commentBody.trim()}
+                >
+                  {commentSending ? 'Posting…' : 'Post'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Raise Hand Modal (Non-owner) ─────────────────────────────────── */}
       {showCollab && (
         <div className="card-modal-backdrop" onClick={() => setShowCollab(false)}>
           <div className="card-modal" onClick={(e) => e.stopPropagation()}>
@@ -247,6 +448,7 @@ export default function ProjectCard({ project, variant = 'feed' }: Props) {
                   value={collabMsg}
                   onChange={(e) => setCollabMsg(e.target.value)}
                 />
+                {collabError && <p className="modal-error-text">{collabError}</p>}
                 <div className="card-modal-footer">
                   <button
                     className="card-modal-btn card-modal-btn--primary"
@@ -257,44 +459,6 @@ export default function ProjectCard({ project, variant = 'feed' }: Props) {
                   </button>
                 </div>
               </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {showComments && (
-        <div className="card-modal-backdrop" onClick={() => setShowComments(false)}>
-          <div className="card-modal card-modal--comments" onClick={(e) => e.stopPropagation()}>
-            <div className="card-modal-header">
-              <span>💬 Comments</span>
-              <button className="card-modal-close" onClick={() => setShowComments(false)}>
-                ✕
-              </button>
-            </div>
-            <div className="card-comments-list">
-              {comments.map((c) => (
-                <div key={c.id} className="card-comment">
-                  <span className="card-comment-author">{c.username}</span>
-                  <p className="card-comment-body">{c.body}</p>
-                </div>
-              ))}
-            </div>
-            {user && (
-              <div className="card-comment-form">
-                <textarea
-                  className="card-modal-textarea"
-                  value={commentBody}
-                  onChange={(e) => setCommentBody(e.target.value)}
-                  placeholder="Add comment..."
-                />
-                <button
-                  className="card-modal-btn"
-                  onClick={handlePostComment}
-                  disabled={commentSending}
-                >
-                  Post
-                </button>
-              </div>
             )}
           </div>
         </div>

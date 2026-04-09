@@ -148,3 +148,62 @@ export const commentsApi = {
     return data;
   },
 };
+
+// ── SSE stream helper ─────────────────────────────────────────────────────────
+
+export type SSEEventType = 'comment' | 'collab' | 'ping' | 'connected';
+
+export interface SSEStreamOptions {
+  /** Called when a `comment` event arrives */
+  onComment?: (comment: Comment) => void;
+  /** Called when a `collab` event arrives */
+  onCollab?: (collab: CollabRequest) => void;
+  /** Called once the stream is confirmed live */
+  onConnected?: () => void;
+  /** Called when the stream closes unexpectedly (network error / server restart) */
+  onError?: () => void;
+}
+
+/**
+ * Opens an SSE stream for a project and returns a cleanup function.
+ *
+ * Usage:
+ *   const close = openProjectStream(projectId, { onComment: (c) => ... });
+ *   // call close() when you no longer need the stream (e.g. in useEffect cleanup)
+ */
+export function openProjectStream(projectId: string, opts: SSEStreamOptions): () => void {
+  const base = import.meta.env.VITE_API_URL || '/api';
+  const url = `${base}/projects/${projectId}/events`;
+
+  const es = new EventSource(url);
+
+  es.addEventListener('connected', () => {
+    opts.onConnected?.();
+  });
+
+  es.addEventListener('comment', (e: MessageEvent) => {
+    try {
+      const comment: Comment = JSON.parse(e.data);
+      opts.onComment?.(comment);
+    } catch {
+      /* malformed frame — ignore */
+    }
+  });
+
+  es.addEventListener('collab', (e: MessageEvent) => {
+    try {
+      const collab: CollabRequest = JSON.parse(e.data);
+      opts.onCollab?.(collab);
+    } catch {
+      /* malformed frame — ignore */
+    }
+  });
+
+  es.onerror = () => {
+    opts.onError?.();
+    // EventSource auto-reconnects; we just surface the signal to the caller
+  };
+
+  // Return a teardown function
+  return () => es.close();
+}

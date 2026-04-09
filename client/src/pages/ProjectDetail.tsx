@@ -1,6 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { projectsApi, collabApi, type Project, type CollabRequest } from '../services/api';
+import {
+  projectsApi,
+  collabApi,
+  type Project,
+  type CollabRequest,
+  type ProjectStage,
+} from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import './ProjectDetail.css';
 
@@ -20,6 +26,13 @@ const STAGE_COLORS: Record<string, string> = {
   completed: 'stage--completed',
 };
 
+const EDITABLE_STAGES: { value: ProjectStage; label: string }[] = [
+  { value: 'planning', label: 'Planning' },
+  { value: 'building', label: 'Building' },
+  { value: 'testing', label: 'Testing' },
+  { value: 'launched', label: 'Launched' },
+];
+
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
@@ -38,6 +51,18 @@ export default function ProjectDetail() {
   const [milestoneError, setMilestoneError] = useState('');
   const [milestoneSuccess, setMilestoneSuccess] = useState('');
 
+  // Edit project state
+  const [showEdit, setShowEdit] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editStage, setEditStage] = useState<ProjectStage>('building');
+  const [editSupportRequired, setEditSupportRequired] = useState('');
+  const [editTechInput, setEditTechInput] = useState('');
+  const [editTechStack, setEditTechStack] = useState<string[]>([]);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState('');
+  const [editSuccess, setEditSuccess] = useState('');
+
   // Collab form state
   const [collabMessage, setCollabMessage] = useState('');
   const [collabLoading, setCollabLoading] = useState(false);
@@ -54,7 +79,6 @@ export default function ProjectDetail() {
   useEffect(() => {
     if (!id) return;
 
-    // Fetch both project details and collab requests
     Promise.all([projectsApi.getById(id), collabApi.getForProject(id)])
       .then(([proj, collabs]) => {
         setProject(proj);
@@ -63,6 +87,74 @@ export default function ProjectDetail() {
       .catch(() => setError('Project not found or server unavailable.'))
       .finally(() => setLoading(false));
   }, [id]);
+
+  // Populate edit form whenever the user opens it
+  const openEditForm = () => {
+    if (!project) return;
+    setEditTitle(project.title);
+    setEditDescription(project.description);
+    setEditStage(project.stage);
+    setEditSupportRequired(project.supportRequired ?? '');
+    setEditTechStack([...project.techStack]);
+    setEditTechInput('');
+    setEditError('');
+    setEditSuccess('');
+    setShowEdit(true);
+  };
+
+  const addEditTech = () => {
+    const t = editTechInput.trim();
+    if (t && !editTechStack.includes(t)) {
+      setEditTechStack((prev) => [...prev, t]);
+    }
+    setEditTechInput('');
+  };
+
+  const removeEditTech = (tech: string) => {
+    setEditTechStack((prev) => prev.filter((t) => t !== tech));
+  };
+
+  const handleEditKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addEditTech();
+    }
+  };
+
+  const handleEditSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!id) return;
+
+    setEditError('');
+    setEditSuccess('');
+
+    if (editTechStack.length === 0) {
+      setEditError('Please add at least one technology.');
+      return;
+    }
+
+    setEditLoading(true);
+    try {
+      const updated = await projectsApi.update(id, {
+        title: editTitle,
+        description: editDescription,
+        stage: editStage,
+        supportRequired: editSupportRequired,
+        techStack: editTechStack,
+      });
+      setProject(updated);
+      setEditSuccess('Project updated!');
+      setTimeout(() => {
+        setShowEdit(false);
+        setEditSuccess('');
+      }, 1500);
+    } catch (err: any) {
+      const msg = err?.response?.data?.error ?? 'Failed to update project.';
+      setEditError(msg);
+    } finally {
+      setEditLoading(false);
+    }
+  };
 
   const handleAddMilestone = async (e: FormEvent) => {
     e.preventDefault();
@@ -298,6 +390,16 @@ export default function ProjectDetail() {
           {isOwner && !project.isCompleted && (
             <div className="sidebar-card">
               <h3 className="sidebar-card-title">Owner Actions</h3>
+
+              {/* ── Edit Project ── */}
+              <button
+                className="btn-outline"
+                style={{ width: '100%', marginBottom: '12px' }}
+                onClick={openEditForm}
+              >
+                ✏️ Edit Project
+              </button>
+
               {completeError && <div className="form-error">{completeError}</div>}
               {!showCompleteConfirm ? (
                 <button className="btn-complete" onClick={() => setShowCompleteConfirm(true)}>
@@ -349,6 +451,115 @@ export default function ProjectDetail() {
           </div>
         </aside>
       </div>
+
+      {/* ── Edit Project Modal ── */}
+      {showEdit && (
+        <div className="card-modal-backdrop" onClick={() => setShowEdit(false)}>
+          <div className="card-modal card-modal--edit" onClick={(e) => e.stopPropagation()}>
+            <div className="card-modal-header">
+              <span>✏️ Edit Project</span>
+              <button className="card-modal-close" onClick={() => setShowEdit(false)}>
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleEditSubmit} className="edit-project-form">
+              {editError && <div className="form-error">{editError}</div>}
+              {editSuccess && <div className="form-success">{editSuccess}</div>}
+
+              <div className="form-group">
+                <label className="form-label">Project Title *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  required
+                  minLength={3}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Description *</label>
+                <textarea
+                  className="form-input form-textarea"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  required
+                  minLength={10}
+                  rows={3}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Technologies *</label>
+                <div className="tech-input-row">
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Add a technology..."
+                    value={editTechInput}
+                    onChange={(e) => setEditTechInput(e.target.value)}
+                    onKeyDown={handleEditKeyDown}
+                  />
+                  <button type="button" className="tech-add-btn" onClick={addEditTech}>
+                    Add
+                  </button>
+                </div>
+                <p className="form-hint">Press Enter or comma to add</p>
+                {editTechStack.length > 0 && (
+                  <div className="tech-tags">
+                    {editTechStack.map((tech) => (
+                      <span key={tech} className="tech-tag">
+                        {tech}
+                        <button type="button" onClick={() => removeEditTech(tech)}>
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Current Stage *</label>
+                <div className="stage-grid stage-grid--compact">
+                  {EDITABLE_STAGES.map((s) => (
+                    <button
+                      key={s.value}
+                      type="button"
+                      className={`stage-option ${editStage === s.value ? 'active' : ''}`}
+                      onClick={() => setEditStage(s.value)}
+                    >
+                      <span className="stage-option-label">{s.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Support Required</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Looking for a UI/UX designer"
+                  value={editSupportRequired}
+                  onChange={(e) => setEditSupportRequired(e.target.value)}
+                />
+              </div>
+
+              <div className="form-actions">
+                <button type="button" className="btn-outline" onClick={() => setShowEdit(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn-primary" disabled={editLoading}>
+                  {editLoading ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

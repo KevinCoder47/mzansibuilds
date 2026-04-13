@@ -4,7 +4,7 @@
 
 MzansiBuilds is a platform that helps developers build publicly and keep up with what other developers are building. Developers can share projects, post milestones, collaborate, comment on each other's work, and get celebrated when they ship.
 
-[![CI](https://github.com/YOUR_USERNAME/mzansibuilds/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/mzansibuilds/actions/workflows/ci.yml)
+[![CI](https://github.com/KevinCoder47/mzansibuilds/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/mzansibuilds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ---

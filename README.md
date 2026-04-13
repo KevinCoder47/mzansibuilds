@@ -31,7 +31,7 @@ MzansiBuilds supports the following user journeys:
 
 1. **Account management** — developers register, log in, and manage their profile.
 2. **Project creation** — create a project with a title, description, tech stack, current stage, and support required.
-3. **Live feed** — browse a real-time feed of what the community is building, powered by WebSockets.
+3. **Live feed** — browse a real-time feed of what the community is building, with live updates via Server-Sent Events.
 4. **Collaboration** — comment on any project or raise a hand to request collaboration.
 5. **Milestones** — continuously log progress milestones against a project.
 6. **Celebration Wall** — completing a project adds the developer to a shared Celebration Wall.
@@ -42,26 +42,32 @@ MzansiBuilds supports the following user journeys:
 
 ```
 mzansibuilds/
-├── client/          # React + TypeScript (Vite) — frontend SPA
+├── client/                   # React + TypeScript (Vite) — frontend SPA
 │   ├── src/
-│   │   ├── components/
-│   │   ├── pages/
-│   │   ├── hooks/
-│   │   ├── services/   # API + WebSocket clients
+│   │   ├── __tests__/        # Component, page, context, and service tests
+│   │   ├── components/       # Navbar, ProjectCard, Footer
+│   │   ├── context/          # AuthContext (JWT state)
+│   │   ├── pages/            # Feed, Landing, Login, Register, NewProject, CelebrationWall
+│   │   ├── services/         # Axios API client + SSE stream helper
 │   │   └── types/
 │   └── ...
-├── server/          # Node.js + Express + TypeScript — REST API
+├── server/                   # Node.js + Express + TypeScript — REST API
 │   ├── src/
-│   │   ├── routes/
-│   │   ├── controllers/
+│   │   ├── __tests__/        # Route integration tests
+│   │   ├── data/
+│   │   │   └── store.ts      # JSON file-based data store (data.json)
 │   │   ├── middleware/
-│   │   ├── models/
-│   │   ├── services/
-│   │   └── tests/
+│   │   │   └── auth.middleware.ts
+│   │   ├── routes/
+│   │   │   ├── auth.ts
+│   │   │   └── projects.ts
+│   │   ├── lib/
+│   │   │   └── sseBroker.ts  # SSE connection manager
+│   │   ├── app.ts
+│   │   └── index.ts
 │   └── ...
 ├── docs/
-│   ├── uml/         # Use-case, class and sequence diagrams
-│   └── ai-ethics.md
+│   └── uml/                  # Use-case, class and sequence diagrams
 └── .github/
     └── workflows/
         └── ci.yml
@@ -69,26 +75,26 @@ mzansibuilds/
 
 **Key architectural decisions:**
 
-- REST API for CRUD operations; WebSockets (Socket.IO) for the live feed and real-time milestone updates.
-- JWT-based authentication with short-lived access tokens and refresh tokens.
-- PostgreSQL as the primary database (via Prisma ORM).
+- REST API for CRUD operations; Server-Sent Events (SSE) for real-time project updates (new comments, collaboration requests).
+- JWT-based authentication with short-lived access tokens.
+- JSON file persistence via `data.json` (managed by `server/src/data/store.ts`) — no external database required to run locally.
 - All secrets injected via environment variables — never hardcoded.
 
 ---
 
 ## Tech stack
 
-| Layer | Technology |
-|---|---|
-| Frontend | React 18, TypeScript, Vite, TailwindCSS |
-| Backend | Node.js, Express, TypeScript |
-| Real-time | Socket.IO |
-| Database | PostgreSQL + Prisma ORM |
-| Auth | JWT (jsonwebtoken) + bcryptjs |
-| Validation | Zod |
-| Security | Helmet, express-rate-limit |
-| Testing | Jest, Supertest (backend) · Vitest, React Testing Library (frontend) |
-| CI/CD | GitHub Actions |
+| Layer      | Technology                                                           |
+| ---------- | -------------------------------------------------------------------- |
+| Frontend   | React 18, TypeScript, Vite, TailwindCSS                              |
+| Backend    | Node.js, Express, TypeScript                                         |
+| Real-time  | Server-Sent Events (SSE)                                             |
+| Data store | JSON file (`data.json`) via a custom store module                    |
+| Auth       | JWT (jsonwebtoken) + bcryptjs                                        |
+| Validation | Zod                                                                  |
+| Security   | Helmet, express-rate-limit                                           |
+| Testing    | Jest, Supertest (backend) · Vitest, React Testing Library (frontend) |
+| CI/CD      | GitHub Actions                                                       |
 
 ---
 
@@ -97,7 +103,6 @@ mzansibuilds/
 ### Prerequisites
 
 - Node.js ≥ 18
-- PostgreSQL ≥ 14
 - npm ≥ 9
 
 ### Installation
@@ -114,13 +119,11 @@ cd server && npm install
 cd ../client && npm install
 ```
 
-### Database setup
+### Environment setup
 
 ```bash
 cd server
-cp ../.env.example .env        # fill in your values
-npx prisma migrate dev         # run migrations
-npx prisma db seed             # optional: seed demo data
+cp .env.example .env   # fill in your values
 ```
 
 ### Run in development
@@ -135,7 +138,7 @@ cd client && npm run dev
 
 The API runs on `http://localhost:5000` and the frontend on `http://localhost:5173`.
 
-API docs (Swagger UI) are available at `http://localhost:5000/api-docs`.
+> **Note:** A `data.json` file will be created automatically in the project root the first time the server starts. This file acts as the local database — do not commit it.
 
 ---
 
@@ -143,17 +146,19 @@ API docs (Swagger UI) are available at `http://localhost:5000/api-docs`.
 
 Copy `.env.example` to `.env` inside the `server/` directory and fill in the values. **Never commit `.env`.**
 
-| Variable | Description | Example |
-|---|---|---|
-| `PORT` | Port the API server listens on | `5000` |
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@localhost:5432/mzansibuilds` |
-| `JWT_SECRET` | Secret key for signing access tokens | *(long random string)* |
-| `JWT_REFRESH_SECRET` | Secret key for signing refresh tokens | *(long random string)* |
-| `JWT_EXPIRES_IN` | Access token lifetime | `15m` |
-| `JWT_REFRESH_EXPIRES_IN` | Refresh token lifetime | `7d` |
-| `CLIENT_ORIGIN` | Allowed CORS origin | `http://localhost:5173` |
-| `AI_API_KEY` | API key for AI provider | *(see AI usage section)* |
-| `NODE_ENV` | Runtime environment | `development` |
+| Variable         | Description                          | Example                 |
+| ---------------- | ------------------------------------ | ----------------------- |
+| `PORT`           | Port the API server listens on       | `5000`                  |
+| `JWT_SECRET`     | Secret key for signing access tokens | _(long random string)_  |
+| `JWT_EXPIRES_IN` | Access token lifetime                | `15m`                   |
+| `CLIENT_ORIGIN`  | Allowed CORS origin                  | `http://localhost:5173` |
+| `NODE_ENV`       | Runtime environment                  | `development`           |
+
+The frontend reads one variable (set in `client/.env`):
+
+| Variable       | Description                  | Example                     |
+| -------------- | ---------------------------- | --------------------------- |
+| `VITE_API_URL` | Base URL for the backend API | `http://localhost:5000/api` |
 
 ---
 
@@ -175,75 +180,73 @@ npm test                  # run all component tests
 npm run test:coverage
 ```
 
-Tests follow a strict **Red → Green → Refactor** TDD cycle. Every route and core component has a corresponding test file. CI enforces that no code merges to `main` unless all tests pass.
+Tests follow a strict **Red → Green → Refactor** TDD cycle. Every route and core component has a corresponding test file. Rate limiting is automatically disabled in the test environment (`NODE_ENV=test`), so auth route tests will never produce false `429` responses. CI enforces that no code merges to `main` unless all tests pass.
 
 ---
 
 ## API reference
 
-Interactive docs are served by Swagger UI at `/api-docs` when the server is running.
+### Health check
+
+| Method | Endpoint      | Description                |
+| ------ | ------------- | -------------------------- |
+| GET    | `/api/health` | Confirm the API is running |
 
 ### Auth
 
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/api/auth/register` | Register a new developer account |
-| POST | `/api/auth/login` | Log in and receive JWT tokens |
-| POST | `/api/auth/refresh` | Exchange refresh token for new access token |
-| POST | `/api/auth/logout` | Invalidate refresh token |
-
-### Developers
-
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/api/developers/:id` | Get a developer's public profile |
-| PATCH | `/api/developers/:id` | Update own profile |
+| Method | Endpoint             | Auth | Description                           |
+| ------ | -------------------- | ---- | ------------------------------------- |
+| POST   | `/api/auth/register` | —    | Register a new developer account      |
+| POST   | `/api/auth/login`    | —    | Log in and receive a JWT access token |
 
 ### Projects
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/api/projects` | List all projects (paginated feed) |
-| POST | `/api/projects` | Create a new project |
-| GET | `/api/projects/:id` | Get a single project |
-| PATCH | `/api/projects/:id` | Update a project |
-| POST | `/api/projects/:id/complete` | Mark project as complete |
+| Method | Endpoint                     | Auth          | Description                             |
+| ------ | ---------------------------- | ------------- | --------------------------------------- |
+| GET    | `/api/projects`              | —             | List all projects (sorted newest first) |
+| POST   | `/api/projects`              | ✅            | Create a new project                    |
+| GET    | `/api/projects/:id`          | —             | Get a single project                    |
+| PATCH  | `/api/projects/:id`          | ✅ Owner only | Update project details                  |
+| POST   | `/api/projects/:id/complete` | ✅ Owner only | Mark project as complete                |
+
+**Valid `stage` values:** `planning` · `building` · `testing` · `launched` · `completed`
 
 ### Milestones
 
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/api/projects/:id/milestones` | Add a milestone |
-| GET | `/api/projects/:id/milestones` | List milestones for a project |
+| Method | Endpoint                       | Auth | Description                  |
+| ------ | ------------------------------ | ---- | ---------------------------- |
+| POST   | `/api/projects/:id/milestones` | ✅   | Add a milestone to a project |
 
 ### Comments
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/api/projects/:id/comments` | Get comments on a project |
-| POST | `/api/projects/:id/comments` | Post a comment |
+| Method | Endpoint                     | Auth | Description               |
+| ------ | ---------------------------- | ---- | ------------------------- |
+| GET    | `/api/projects/:id/comments` | —    | Get comments on a project |
+| POST   | `/api/projects/:id/comments` | ✅   | Post a comment            |
 
 ### Collaboration
 
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/api/projects/:id/collaborate` | Raise a hand for collaboration |
-| PATCH | `/api/collaborate/:requestId` | Accept or reject a request |
+| Method | Endpoint                   | Auth | Description                                              |
+| ------ | -------------------------- | ---- | -------------------------------------------------------- |
+| GET    | `/api/projects/:id/collab` | —    | List collaboration requests for a project                |
+| POST   | `/api/projects/:id/collab` | ✅   | Raise a hand to collaborate (cannot be your own project) |
 
-### Celebration Wall
+### Real-time — SSE stream
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/api/celebration` | Get all completed projects on the wall |
+| Endpoint                       | Description                                   |
+| ------------------------------ | --------------------------------------------- |
+| `GET /api/projects/:id/events` | Open an SSE stream scoped to a single project |
 
-### WebSocket events
+**Events emitted by the server:**
 
-| Event | Direction | Payload |
-|---|---|---|
-| `project:new` | Server → Client | New project created |
-| `milestone:added` | Server → Client | Milestone posted |
-| `comment:new` | Server → Client | New comment on a project |
-| `collaborate:request` | Server → Client | Collaboration request received |
+| Event       | Payload                | Trigger                           |
+| ----------- | ---------------------- | --------------------------------- |
+| `connected` | `{ projectId }`        | Immediately on stream open        |
+| `comment`   | `Comment` object       | New comment posted on the project |
+| `collab`    | `CollabRequest` object | New collaboration request raised  |
+| `ping`      | _(keepalive)_          | Every 25 seconds                  |
+
+The frontend `openProjectStream(projectId, opts)` helper in `client/src/services/api.ts` wraps the native `EventSource` API and returns a cleanup function suitable for use in a `useEffect` hook.
 
 ---
 
@@ -252,8 +255,8 @@ Interactive docs are served by Swagger UI at `/api-docs` when the server is runn
 Diagrams are stored in [`/docs/uml/`](docs/uml/).
 
 - `use-case.png` — all actor interactions with the system
-- `class-diagram.png` — entity model (Developer, Project, Milestone, Comment, CollaborationRequest, CelebrationEntry)
-- `sequence-diagram.png` — project creation → live feed broadcast → milestone update flow
+- `class-diagram.png` — entity model (Developer, Project, Milestone, Comment, CollabRequest)
+- `sequence-diagram.png` — project creation → SSE broadcast → milestone update flow
 
 ---
 

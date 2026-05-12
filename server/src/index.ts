@@ -1,14 +1,22 @@
-import app from './app';
+import app from './app.js';
 import http from 'http';
 import dotenv from 'dotenv';
+import { connectDB } from './data/store.js';
 
 dotenv.config();
 
 const PORT = process.env.PORT || 5000;
 
-// Plain HTTP server — real-time delivery is handled via SSE in routes/projects.ts
-const httpServer = http.createServer(app);
+const start = async () => {
+  await connectDB();
 
-httpServer.listen(PORT, () => {
-  console.warn(`MzansiBuilds API running on http://localhost:${PORT}`);
+  const httpServer = http.createServer(app);
+  httpServer.listen(PORT, () => {
+    console.warn(`MzansiBuilds API running on http://localhost:${PORT}`);
+  });
+};
+
+start().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });

@@ -24,7 +24,8 @@
   "homepage": "https://github.com/KevinCoder47/mzansibuilds#readme",
   "devDependencies": {
     "husky": "^9.0.0",
-    "lint-staged": "^15.0.0"
+    "lint-staged": "^15.0.0",
+    "prettier": "^3.8.3"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [
@@ -33,5 +34,8 @@
     "*.{json,md,css}": [
       "prettier --write"
     ]
+  },
+  "dependencies": {
+    "mongodb": "^7.2.0"
   }
 }

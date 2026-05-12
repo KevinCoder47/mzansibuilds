@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { protect, AuthRequest } from '../middleware/auth.middleware';
+import { protect, AuthRequest } from '../middleware/auth.middleware.js';
 import {
   addProject,
   getProjects,
@@ -14,8 +14,8 @@ import {
   ProjectStage,
   findUserById,
   saveData,
-} from '../data/store';
-import { subscribe, unsubscribe, broadcast } from '../lib/sseBroker';
+} from '../data/store.js';
+import { subscribe, unsubscribe, broadcast } from '../lib/sseBroker.js';
 
 const router = Router();
 
@@ -51,17 +51,17 @@ const commentSchema = z.object({
 // ─── PROJECT FEED ─────────────────────────────────────────────────────────────
 
 // GET /api/projects — Get all projects (sorted by newest)
-router.get('/', (_req, res: Response) => {
-  const allProjects = getProjects()
+router.get('/', async (_req, res: Response) => {
+  const allProjects = (await getProjects())
     .slice()
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   res.status(200).json({ projects: allProjects });
 });
 
 // GET /api/projects/:id — Get specific project details
-router.get('/:id', (req, res: Response) => {
+router.get('/:id', async (req, res: Response) => {
   const id = req.params['id'] as string;
-  const project = findProjectById(id);
+  const project = await findProjectById(id);
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
     return;
@@ -71,39 +71,24 @@ router.get('/:id', (req, res: Response) => {
 
 // ─── REAL-TIME SSE STREAM ─────────────────────────────────────────────────────
 
-/**
- * GET /api/projects/:id/events
- *
- * Server-Sent Events stream scoped to a single project.
- * Emits:
- *   event: comment   — when a new comment is posted
- *   event: collab    — when a new collaboration request is raised
- *   event: ping      — keepalive every 25 s (handled by sseBroker)
- *
- * No authentication required — comments/collab data is already public via REST.
- */
-router.get('/:id/events', (req: Request, res: Response) => {
+router.get('/:id/events', async (req: Request, res: Response) => {
   const projectId = req.params['id'] as string;
 
-  // Validate project exists before opening a stream
-  if (!findProjectById(projectId)) {
+  if (!(await findProjectById(projectId))) {
     res.status(404).json({ error: 'Project not found' });
     return;
   }
 
-  // SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering if present
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
-  // Send an immediate connected confirmation so the client knows the stream is live
   res.write(`event: connected\ndata: {"projectId":"${projectId}"}\n\n`);
 
   const client = subscribe(projectId, res);
 
-  // Clean up when the client closes the connection
   req.on('close', () => {
     unsubscribe(client);
   });
@@ -112,14 +97,14 @@ router.get('/:id/events', (req: Request, res: Response) => {
 // ─── PROJECT ACTIONS (PROTECTED) ─────────────────────────────────────────────
 
 // POST /api/projects — Create a new project
-router.post('/', protect, (req: AuthRequest, res: Response) => {
+router.post('/', protect, async (req: AuthRequest, res: Response) => {
   const result = projectSchema.safeParse(req.body);
   if (!result.success) {
     const firstError = result.error.issues[0]?.message ?? 'Validation error';
     res.status(400).json({ error: firstError });
     return;
   }
-  const newProject = addProject({
+  const newProject = await addProject({
     ...result.data,
     stage: result.data.stage as ProjectStage,
     developerId: req.developerId as string,
@@ -128,9 +113,9 @@ router.post('/', protect, (req: AuthRequest, res: Response) => {
 });
 
 // PATCH /api/projects/:id — Update project info
-router.patch('/:id', protect, (req: AuthRequest, res: Response) => {
+router.patch('/:id', protect, async (req: AuthRequest, res: Response) => {
   const id = req.params['id'] as string;
-  const project = findProjectById(id);
+  const project = await findProjectById(id);
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
     return;
@@ -145,14 +130,14 @@ router.patch('/:id', protect, (req: AuthRequest, res: Response) => {
       (project as any)[field] = req.body[field];
     }
   });
-  saveData();
+  await saveData();
   res.status(200).json(project);
 });
 
 // POST /api/projects/:id/milestones — Add a milestone
-router.post('/:id/milestones', protect, (req: AuthRequest, res: Response) => {
+router.post('/:id/milestones', protect, async (req: AuthRequest, res: Response) => {
   const id = req.params['id'] as string;
-  const project = findProjectById(id);
+  const project = await findProjectById(id);
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
     return;
@@ -162,14 +147,14 @@ router.post('/:id/milestones', protect, (req: AuthRequest, res: Response) => {
     res.status(400).json({ error: result.error.issues[0]?.message ?? 'Validation error' });
     return;
   }
-  const milestone = addMilestone(id, result.data);
+  const milestone = await addMilestone(id, result.data);
   res.status(201).json(milestone);
 });
 
 // POST /api/projects/:id/complete — Mark as finished
-router.post('/:id/complete', protect, (req: AuthRequest, res: Response) => {
+router.post('/:id/complete', protect, async (req: AuthRequest, res: Response) => {
   const id = req.params['id'] as string;
-  const project = findProjectById(id);
+  const project = await findProjectById(id);
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
     return;
@@ -178,7 +163,7 @@ router.post('/:id/complete', protect, (req: AuthRequest, res: Response) => {
     res.status(403).json({ error: 'You can only complete your own projects' });
     return;
   }
-  const completed = completeProject(id);
+  const completed = await completeProject(id);
   res.status(200).json({
     message: 'Congratulations! Your project has been completed 🎉',
     project: completed,
@@ -188,16 +173,16 @@ router.post('/:id/complete', protect, (req: AuthRequest, res: Response) => {
 // ─── COLLABORATION SYSTEM ─────────────────────────────────────────────────────
 
 // GET /api/projects/:id/collab — See who wants to help
-router.get('/:id/collab', (req, res: Response) => {
+router.get('/:id/collab', async (req, res: Response) => {
   const id = req.params['id'] as string;
-  const requests = getCollabRequestsByProject(id);
+  const requests = await getCollabRequestsByProject(id);
   res.status(200).json(requests);
 });
 
 // POST /api/projects/:id/collab — Raise your hand to help
-router.post('/:id/collab', protect, (req: AuthRequest, res: Response) => {
+router.post('/:id/collab', protect, async (req: AuthRequest, res: Response) => {
   const projectId = req.params['id'] as string;
-  const user = findUserById(req.developerId as string);
+  const user = await findUserById(req.developerId as string);
   if (!user) {
     res.status(404).json({ error: 'User not found' });
     return;
@@ -207,19 +192,18 @@ router.post('/:id/collab', protect, (req: AuthRequest, res: Response) => {
     res.status(400).json({ error: result.error.issues[0]?.message ?? 'Invalid message' });
     return;
   }
-  const project = findProjectById(projectId);
+  const project = await findProjectById(projectId);
   if (project?.developerId === user.id) {
     res.status(400).json({ error: 'You cannot join your own project as a collaborator!' });
     return;
   }
-  const collab = addCollabRequest({
+  const collab = await addCollabRequest({
     projectId: projectId,
     userId: user.id,
     username: user.username,
     message: result.data.message,
   });
 
-  // ── Broadcast to all SSE subscribers of this project ──
   broadcast(projectId, 'collab', collab);
 
   res.status(201).json(collab);
@@ -228,26 +212,26 @@ router.post('/:id/collab', protect, (req: AuthRequest, res: Response) => {
 // ─── COMMENTS SYSTEM ──────────────────────────────────────────────────────────
 
 // GET /api/projects/:id/comments — Get all comments for a project
-router.get('/:id/comments', (req, res: Response) => {
+router.get('/:id/comments', async (req, res: Response) => {
   const projectId = req.params['id'] as string;
-  const project = findProjectById(projectId);
+  const project = await findProjectById(projectId);
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
     return;
   }
-  const comments = getCommentsByProject(projectId);
+  const comments = await getCommentsByProject(projectId);
   res.status(200).json(comments);
 });
 
 // POST /api/projects/:id/comments — Post a comment (authenticated)
-router.post('/:id/comments', protect, (req: AuthRequest, res: Response) => {
+router.post('/:id/comments', protect, async (req: AuthRequest, res: Response) => {
   const projectId = req.params['id'] as string;
-  const project = findProjectById(projectId);
+  const project = await findProjectById(projectId);
   if (!project) {
     res.status(404).json({ error: 'Project not found' });
     return;
   }
-  const user = findUserById(req.developerId as string);
+  const user = await findUserById(req.developerId as string);
   if (!user) {
     res.status(404).json({ error: 'User not found' });
     return;
@@ -257,14 +241,13 @@ router.post('/:id/comments', protect, (req: AuthRequest, res: Response) => {
     res.status(400).json({ error: result.error.issues[0]?.message ?? 'Invalid comment' });
     return;
   }
-  const comment = addComment({
+  const comment = await addComment({
     projectId,
     userId: user.id,
     username: user.username,
     body: result.data.body,
   });
 
-  // ── Broadcast to all SSE subscribers of this project ──
   broadcast(projectId, 'comment', comment);
 
   res.status(201).json(comment);

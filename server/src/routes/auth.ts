@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
-import { addUser, findUserByEmail } from '../data/store';
+import { addUser, findUserByEmail } from '../data/store.js';
 
 const router = Router();
 
@@ -33,7 +33,6 @@ const createToken = (developerId: string): string => {
 router.post('/register', async (req: Request, res: Response) => {
   const result = registerSchema.safeParse(req.body);
   if (!result.success) {
-    // noUncheckedIndexedAccess: issues[0] may be undefined, fall back to a safe message
     const firstError = result.error.issues[0]?.message ?? 'Validation error';
     res.status(400).json({ error: firstError });
     return;
@@ -41,7 +40,7 @@ router.post('/register', async (req: Request, res: Response) => {
 
   const { username, email, password } = result.data;
 
-  const existing = findUserByEmail(email);
+  const existing = await findUserByEmail(email);
   if (existing) {
     res.status(400).json({ error: 'Email already in use' });
     return;
@@ -59,7 +58,7 @@ router.post('/register', async (req: Request, res: Response) => {
     createdAt: new Date().toISOString(),
   };
 
-  addUser(newDeveloper);
+  await addUser(newDeveloper);
 
   const token = createToken(newDeveloper.id);
 
@@ -79,7 +78,6 @@ router.post('/register', async (req: Request, res: Response) => {
 router.post('/login', async (req: Request, res: Response) => {
   const result = loginSchema.safeParse(req.body);
   if (!result.success) {
-    // noUncheckedIndexedAccess: issues[0] may be undefined, fall back to a safe message
     const firstError = result.error.issues[0]?.message ?? 'Validation error';
     res.status(400).json({ error: firstError });
     return;
@@ -87,7 +85,7 @@ router.post('/login', async (req: Request, res: Response) => {
 
   const { email, password } = result.data;
 
-  const developer = findUserByEmail(email);
+  const developer = await findUserByEmail(email);
   if (!developer) {
     res.status(401).json({ error: 'Invalid email or password' });
     return;

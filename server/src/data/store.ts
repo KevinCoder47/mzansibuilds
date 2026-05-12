@@ -1,6 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import fs from 'fs';
-import path from 'path';
+import { MongoClient, Collection, Db } from 'mongodb';
 
 // ─── Types & Interfaces ───────────────────────────────────────────────────────
 
@@ -55,74 +54,75 @@ export interface Project {
   createdAt: string;
 }
 
-// ─── Persistence Logic ────────────────────────────────────────────────────────
+// ─── MongoDB Connection ───────────────────────────────────────────────────────
 
-const DB_PATH = path.join(__dirname, '../../data.json');
+let client: MongoClient;
+let db: Db;
 
-interface Schema {
-  users: Developer[];
-  projects: Project[];
-  collabRequests: CollabRequest[];
-  comments: Comment[];
-}
+let users: Collection<Developer>;
+let projects: Collection<Project>;
+let collabRequests: Collection<CollabRequest>;
+let comments: Collection<Comment>;
 
-let db: Schema = {
-  users: [],
-  projects: [],
-  collabRequests: [],
-  comments: [],
+export const connectDB = async (): Promise<void> => {
+  const uri = process.env.MONGODB_URI;
+  if (!uri) throw new Error('MONGODB_URI environment variable is not set');
+
+  client = new MongoClient(uri);
+  await client.connect();
+  db = client.db('mzansibuilds');
+
+  users = db.collection<Developer>('users');
+  projects = db.collection<Project>('projects');
+  collabRequests = db.collection<CollabRequest>('collabRequests');
+  comments = db.collection<Comment>('comments');
+
+  // Indexes for fast lookups
+  await users.createIndex({ email: 1 }, { unique: true });
+  await projects.createIndex({ createdAt: -1 });
+  await comments.createIndex({ projectId: 1, createdAt: 1 });
+  await collabRequests.createIndex({ projectId: 1 });
+
+  console.log('Connected to MongoDB');
 };
 
-const loadData = () => {
-  try {
-    if (fs.existsSync(DB_PATH)) {
-      const data = fs.readFileSync(DB_PATH, 'utf-8');
-      const parsed = JSON.parse(data);
-      // Migrate: ensure comments array exists in older data files
-      db = { comments: [], ...parsed };
-    } else {
-      saveData();
-    }
-  } catch (error) {
-    console.error('Error loading database:', error);
-  }
-};
+// ─── saveData (no-op — kept so projects.ts PATCH route compiles without changes) ──
 
-export const saveData = () => {
-  try {
-    fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), 'utf-8');
-  } catch (error) {
-    console.error('Error saving database:', error);
-  }
+export const saveData = async (): Promise<void> => {
+  // MongoDB writes are immediate — nothing to flush
 };
-
-loadData();
 
 // ─── Developer Helpers ────────────────────────────────────────────────────────
 
-export const getUsers = (): Developer[] => db.users;
-
-export const addUser = (user: Developer): void => {
-  db.users.push(user);
-  saveData();
+export const getUsers = async (): Promise<Developer[]> => {
+  return users.find().toArray();
 };
 
-export const findUserByEmail = (email: string): Developer | undefined =>
-  db.users.find((u) => u.email === email);
+export const addUser = async (user: Developer): Promise<void> => {
+  await users.insertOne(user);
+};
 
-export const findUserById = (id: string): Developer | undefined =>
-  db.users.find((u) => u.id === id);
+export const findUserByEmail = async (email: string): Promise<Developer | null> => {
+  return users.findOne({ email });
+};
+
+export const findUserById = async (id: string): Promise<Developer | null> => {
+  return users.findOne({ id });
+};
 
 // ─── Project Helpers ──────────────────────────────────────────────────────────
 
-export const getProjects = (): Project[] => db.projects;
+export const getProjects = async (): Promise<Project[]> => {
+  return projects.find().toArray();
+};
 
-export const findProjectById = (id: string): Project | undefined =>
-  db.projects.find((p) => p.id === id);
+export const findProjectById = async (id: string): Promise<Project | null> => {
+  return projects.findOne({ id });
+};
 
-export const addProject = (
+export const addProject = async (
   projectData: Omit<Project, 'id' | 'milestones' | 'isCompleted' | 'createdAt'>,
-): Project => {
+): Promise<Project> => {
   const newProject: Project = {
     ...projectData,
     id: uuidv4(),
@@ -130,18 +130,14 @@ export const addProject = (
     isCompleted: false,
     createdAt: new Date().toISOString(),
   };
-  db.projects.push(newProject);
-  saveData();
+  await projects.insertOne(newProject);
   return newProject;
 };
 
-export const addMilestone = (
+export const addMilestone = async (
   projectId: string,
   data: { title: string; description: string },
-): Milestone | null => {
-  const project = findProjectById(projectId);
-  if (!project) return null;
-
+): Promise<Milestone | null> => {
   const milestone: Milestone = {
     id: uuidv4(),
     projectId,
@@ -149,59 +145,63 @@ export const addMilestone = (
     description: data.description,
     achievedAt: new Date().toISOString(),
   };
-
-  project.milestones.push(milestone);
-  saveData();
+  const result = await projects.findOneAndUpdate(
+    { id: projectId },
+    { $push: { milestones: milestone } },
+    { returnDocument: 'after' },
+  );
+  if (!result) return null;
   return milestone;
 };
 
-export const completeProject = (projectId: string): Project | null => {
-  const project = findProjectById(projectId);
-  if (!project) return null;
-
-  project.isCompleted = true;
-  project.stage = 'completed';
-  saveData();
-  return project;
+export const completeProject = async (projectId: string): Promise<Project | null> => {
+  const result = await projects.findOneAndUpdate(
+    { id: projectId },
+    { $set: { isCompleted: true, stage: 'completed' as ProjectStage } },
+    { returnDocument: 'after' },
+  );
+  return result ?? null;
 };
 
 // ─── Collaboration Helpers ────────────────────────────────────────────────────
 
-export const addCollabRequest = (req: Omit<CollabRequest, 'id' | 'createdAt'>): CollabRequest => {
+export const addCollabRequest = async (
+  req: Omit<CollabRequest, 'id' | 'createdAt'>,
+): Promise<CollabRequest> => {
   const newRequest: CollabRequest = {
     ...req,
     id: uuidv4(),
     createdAt: new Date().toISOString(),
   };
-  db.collabRequests.push(newRequest);
-  saveData();
+  await collabRequests.insertOne(newRequest);
   return newRequest;
 };
 
-export const getCollabRequestsByProject = (projectId: string): CollabRequest[] =>
-  db.collabRequests.filter((r) => r.projectId === projectId);
+export const getCollabRequestsByProject = async (projectId: string): Promise<CollabRequest[]> => {
+  return collabRequests.find({ projectId }).toArray();
+};
 
 // ─── Comment Helpers ──────────────────────────────────────────────────────────
 
-export const addComment = (data: Omit<Comment, 'id' | 'createdAt'>): Comment => {
+export const addComment = async (data: Omit<Comment, 'id' | 'createdAt'>): Promise<Comment> => {
   const comment: Comment = {
     ...data,
     id: uuidv4(),
     createdAt: new Date().toISOString(),
   };
-  db.comments.push(comment);
-  saveData();
+  await comments.insertOne(comment);
   return comment;
 };
 
-export const getCommentsByProject = (projectId: string): Comment[] =>
-  db.comments
-    .filter((c) => c.projectId === projectId)
-    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+export const getCommentsByProject = async (projectId: string): Promise<Comment[]> => {
+  return comments.find({ projectId }).sort({ createdAt: 1 }).toArray();
+};
 
 // ─── System Helpers ───────────────────────────────────────────────────────────
 
-export const clearAll = (): void => {
-  db = { users: [], projects: [], collabRequests: [], comments: [] };
-  saveData();
+export const clearAll = async (): Promise<void> => {
+  await users.deleteMany({});
+  await projects.deleteMany({});
+  await collabRequests.deleteMany({});
+  await comments.deleteMany({});
 };

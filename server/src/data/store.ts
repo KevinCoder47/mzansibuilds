@@ -68,7 +68,9 @@ export const connectDB = async (): Promise<void> => {
   const uri = process.env.MONGODB_URI;
   if (!uri) throw new Error('MONGODB_URI environment variable is not set');
 
-  client = new MongoClient(uri);
+  client = new MongoClient(uri, {
+    serverSelectionTimeoutMS: 5000,
+  });
   await client.connect();
   db = client.db('mzansibuilds');
 
